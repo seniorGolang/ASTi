@@ -1,0 +1,440 @@
+# ASTi - Go Interface Parser Library
+
+## Overview
+
+ASTi is a powerful Go library for parsing Go interfaces with custom annotation support. It provides a comprehensive solution for extracting metadata from Go code, analyzing interface structures, and generating documentation or code based on annotations.
+
+## Key Features
+
+- **Go Interface Parsing**: Full support for all Go data types including generics, slices, maps, channels, pointers, and arrays
+- **Custom Annotations**: Flexible annotation syntax with key-value pairs and quoted strings
+- **Pipeline Architecture**: Extensible processing pipeline with multiple stages
+- **JSON Serialization**: Built-in JSON serialization/deserialization of parsing results
+- **Complex Type Support**: Handles cyclic structures, nested types, and recursive definitions
+- **Validation & Filtering**: Data validation and filtering capabilities
+- **OpenTelemetry Integration**: Built-in observability support
+- **High Performance**: Optimized for large codebases with minimal memory usage
+
+## Core Components
+
+### Parser Package (`parser/`)
+
+The main entry point for the library. Provides a high-level API for parsing Go packages.
+
+**Main Types:**
+- `Parser`: Main parser struct with configuration and pipeline
+- `Package`: Result structure containing parsed package information
+- `Interface`: Represents a Go interface with methods and annotations
+- `Method`: Represents a method within an interface
+- `Variable`: Represents parameters and return values
+- `TypeInfo`: Information about Go types found in the package
+
+**Key Methods:**
+```go
+// Create new parser with optional configuration
+func NewParser(options ...Option) *Parser
+
+// Parse package and return structured data
+func (p *Parser) ParsePackage(ctx context.Context, packagePath string) (*models.Package, error)
+
+// Parse package and return JSON directly
+func (p *Parser) ParsePackageToJSON(ctx context.Context, packagePath string) ([]byte, error)
+
+// Serialize package to JSON
+func (p *Parser) ToJSON(pkg *models.Package) ([]byte, error)
+
+// Deserialize package from JSON
+func (p *Parser) FromJSON(jsonData []byte) (*models.Package, error)
+```
+
+**Options:**
+```go
+// WithAnnotationPrefix sets custom annotation prefix
+func WithAnnotationPrefix(prefix string) Option
+```
+
+### Models Package (`parser/models/`)
+
+Contains all data structures and models used throughout the library.
+
+**Core Models:**
+- `Package`: Complete package information including interfaces, types, and annotations
+- `Interface`: Interface definition with methods and metadata
+- `Method`: Method definition with parameters, results, and annotations
+- `Variable`: Parameter or return value with type information
+- `TypeInfo`: Detailed type information including fields and annotations
+- `Position`: Source code position information
+- `Annotations`: Key-value annotation storage
+
+**Type Support:**
+- Basic types: `string`, `int`, `float64`, `bool`
+- Complex types: `[]T`, `map[K]V`, `*T`, `chan T`, `[N]T`
+- Generic types: `Container[T]`, `Node[T, U]`
+- Interface types: `interface{}`, custom interfaces
+- Function types: `func(T) R`
+- Channel types: `chan T`, `<-chan T`, `chan<- T`
+
+### Pipeline Package (`parser/pipeline/`)
+
+Implements the processing pipeline architecture for extensible data processing.
+
+**Pipeline Stages:**
+1. **AST Stage**: Parses Go AST and extracts interface information
+2. **Filter Stage**: Filters and validates parsed data
+3. **Type Collection Stage**: Collects and processes type information
+4. **Serialization Stage**: Handles JSON serialization/deserialization
+5. **Validation Stage**: Validates data integrity and structure
+
+**Pipeline Architecture:**
+```go
+type Pipeline struct {
+    stages []Stage
+}
+
+type Stage interface {
+    Execute(ctx context.Context, data Data) (Data, error)
+}
+
+type Data struct {
+    Package *models.Package
+    // Additional pipeline data
+}
+```
+
+## Annotation System
+
+ASTi supports a flexible annotation system with the following syntax:
+
+### Basic Syntax
+```go
+// @asti key=value
+// @asti name="UserService" version="1.0"
+// @asti timeout=30 retry=3 validation=strict
+```
+
+### Annotation Levels
+- **Package Level**: Applied to entire package
+- **Interface Level**: Applied to interface definitions
+- **Method Level**: Applied to individual methods
+- **Field Level**: Applied to struct fields
+- **Type Level**: Applied to type definitions
+
+### Annotation Parser
+The `AnnotationParser` interface provides extensible annotation parsing:
+```go
+type AnnotationParser interface {
+    Parse(ctx context.Context, text string) (Annotations, error)
+}
+```
+
+## Usage Examples
+
+### Basic Interface Parsing
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+
+    "github.com/seniorGolang/asti/parser"
+)
+
+func main() {
+    // Create parser with default @asti annotation prefix
+    p := parser.NewParser()
+
+    // Parse package
+    ctx := context.Background()
+    pkg, err := p.ParsePackage(ctx, "./examples/sample")
+    if err != nil {
+        log.Fatalf("Failed to parse package: %v", err)
+    }
+
+    // Process interfaces
+    for _, iface := range pkg.Interfaces {
+        fmt.Printf("Interface: %s\n", iface.Name)
+        fmt.Printf("  Methods: %d\n", len(iface.Methods))
+        fmt.Printf("  Annotations: %v\n", iface.Annotations)
+        
+        for _, method := range iface.Methods {
+            fmt.Printf("    Method: %s\n", method.Name)
+            fmt.Printf("      Parameters: %d\n", len(method.Parameters))
+            fmt.Printf("      Results: %d\n", len(method.Results))
+        }
+    }
+}
+```
+
+### Go Code with Annotations
+```go
+// @asti version=1.0 author="Team"
+package examples
+
+import "context"
+
+// @asti name="UserService" timeout=30 retry=3
+type UserService interface {
+    // @asti method=CreateUser timeout=10
+    CreateUser(ctx context.Context, name string, email string) (userID string, err error)
+
+    // @asti method=GetUser timeout=5
+    GetUser(ctx context.Context, userID string) (user User, err error)
+
+    // @asti method=UpdateUser timeout=15
+    UpdateUser(ctx context.Context, userID string, updates UserUpdates) (user User, err error)
+
+    // @asti method=DeleteUser timeout=8
+    DeleteUser(ctx context.Context, userID string) (err error)
+}
+
+// @asti type=UserModel validation=strict
+type User struct {
+    // @asti field=ID required=true
+    ID string `json:"id"`
+
+    // @asti field=Name required=true maxLength=100
+    Name string `json:"name"`
+
+    // @asti field=Email validation=email
+    Email string `json:"email"`
+
+    // @asti field=Age min=0 max=150
+    Age int `json:"age"`
+}
+
+// @asti type=UserUpdatesModel
+type UserUpdates struct {
+    // @asti field=Name maxLength=100
+    Name *string `json:"name,omitempty"`
+
+    // @asti field=Email validation=email
+    Email *string `json:"email,omitempty"`
+
+    // @asti field=Age min=0 max=150
+    Age *int `json:"age,omitempty"`
+}
+```
+
+### Complex Type Support
+```go
+// @asti type=ComplexTypes
+type ComplexTypes struct {
+    // Generic slices
+    GenericSlice []T `json:"generic_slice"`
+    
+    // Nested maps
+    NestedMap map[string]map[int]string `json:"nested_map"`
+    
+    // Channel types
+    InputChan  <-chan string `json:"input_chan"`
+    OutputChan chan<- int    `json:"output_chan"`
+    
+    // Function types
+    Handler func(context.Context, string) (int, error) `json:"handler"`
+    
+    // Pointer to interface
+    InterfacePtr *SomeInterface `json:"interface_ptr"`
+    
+    // Array types
+    FixedArray [10]string `json:"fixed_array"`
+}
+
+// @asti type=GenericContainer
+type GenericContainer[T any] struct {
+    Data T `json:"data"`
+    
+    // @asti method=Process
+    Process(ctx context.Context, input T) (result T, err error)
+}
+```
+
+### JSON Serialization
+```go
+// Parse and serialize to JSON
+jsonData, err := p.ParsePackageToJSON(ctx, "./examples/sample")
+if err != nil {
+    log.Fatalf("Failed to parse package: %v", err)
+}
+
+// Or serialize existing package
+pkg, _ := p.ParsePackage(ctx, "./examples/sample")
+jsonData, err = p.ToJSON(pkg)
+
+// Deserialize from JSON
+pkg, err = p.FromJSON(jsonData)
+```
+
+## Configuration Options
+
+### Annotation Prefix
+```go
+// Default prefix (@asti) - no need to specify
+parser := parser.NewParser()
+
+// Custom prefix
+parser := parser.NewParser(parser.WithAnnotationPrefix("@custom"))
+```
+
+### Pipeline Configuration
+```go
+// Custom pipeline with specific stages
+annotationParser := models.NewAnnotationParser("@asti")
+pipeline := pipeline.NewPipeline(
+    pipeline.NewStageAST(annotationParser),
+    pipeline.NewStageFilter(),
+    pipeline.NewStageTypeCollection(annotationParser),
+    pipeline.NewStageSerialization(),
+)
+```
+
+## Error Handling
+
+The library provides comprehensive error handling with wrapped errors for traceability:
+
+```go
+pkg, err := p.ParsePackage(ctx, packagePath)
+if err != nil {
+    // Error contains context about what failed
+    log.Printf("Parsing failed: %v", err)
+    return
+}
+```
+
+Common error scenarios:
+- Package path does not exist
+- Invalid Go syntax
+- Annotation parsing errors
+- Pipeline stage failures
+- JSON serialization errors
+
+## Performance Considerations
+
+### Optimization Features
+- **Efficient AST Parsing**: Uses Go's built-in AST package for fast parsing
+- **Memory Management**: Minimal allocations and efficient data structures
+- **Pipeline Caching**: Caches intermediate results where possible
+- **Concurrent Processing**: Support for parallel processing of large codebases
+
+### Benchmarking
+```bash
+go test -bench=. -benchmem ./parser/
+```
+
+## Observability
+
+### OpenTelemetry Integration
+```go
+// Tracing
+ctx, span := tracer.Start(ctx, "parse_package")
+defer span.End()
+
+span.SetAttributes(
+    attribute.String("package.path", packagePath),
+    attribute.Int("interfaces.count", len(pkg.Interfaces)),
+)
+
+// Metrics
+meter := otel.GetMeterProvider().Meter("asti")
+counter, _ := meter.Int64Counter("interfaces_parsed")
+counter.Add(ctx, int64(len(pkg.Interfaces)))
+```
+
+## Testing
+
+### Unit Tests
+```go
+func TestParserBasic(t *testing.T) {
+    p := parser.NewParser()
+    ctx := context.Background()
+    
+    pkg, err := p.ParsePackage(ctx, "./testdata/sample")
+    require.NoError(t, err)
+    require.Len(t, pkg.Interfaces, 1)
+    
+    iface := pkg.Interfaces[0]
+    assert.Equal(t, "UserService", iface.Name)
+    assert.Len(t, iface.Methods, 4)
+}
+```
+
+### Integration Tests
+The library includes comprehensive integration tests covering:
+- Complex import scenarios
+- Cyclic structure handling
+- Generic type parsing
+- Nested type processing
+- Advanced annotation parsing
+- Edge cases and error conditions
+
+## Best Practices
+
+### Code Organization
+1. Use meaningful annotation keys and values
+2. Group related annotations together
+3. Provide clear documentation for custom annotations
+4. Use consistent naming conventions
+
+### Performance
+1. Reuse parser instances when possible
+2. Use context cancellation for long-running operations
+3. Consider caching results for frequently parsed packages
+4. Monitor memory usage for large codebases
+
+### Error Handling
+1. Always check returned errors
+2. Use error wrapping for context
+3. Provide meaningful error messages
+4. Handle edge cases gracefully
+
+## Common Use Cases
+
+### Code Generation
+- Generate client libraries from service interfaces
+- Create API documentation
+- Generate database models
+- Create validation code
+
+### Documentation
+- Extract interface documentation
+- Generate API specifications
+- Create dependency graphs
+- Analyze code structure
+
+### Analysis
+- Interface compatibility checking
+- Dependency analysis
+- Code quality metrics
+- Architecture validation
+
+## Dependencies
+
+### Core Dependencies
+- `go/ast`: Go AST parsing
+- `go/parser`: Go code parsing
+- `go/token`: Token handling
+- `encoding/json`: JSON serialization
+
+### Optional Dependencies
+- `go.opentelemetry.io/otel`: Observability support
+- `go.opentelemetry.io/otel/trace`: Tracing
+- `go.opentelemetry.io/otel/metric`: Metrics
+
+## Version Compatibility
+
+- **Go Version**: 1.24+
+- **Architecture**: Clean Architecture with dependency inversion
+- **Patterns**: Pipeline pattern, Strategy pattern, Factory pattern
+- **Testing**: Table-driven tests, integration tests, benchmarks
+
+## Contributing
+
+The library follows Go best practices and clean architecture principles:
+- Interface-driven development
+- Dependency injection
+- Comprehensive testing
+- Clear separation of concerns
+- Extensive documentation
+
+For contribution guidelines, see the project's CONTRIBUTING.md file. 
